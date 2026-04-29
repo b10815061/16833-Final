@@ -1,45 +1,110 @@
-# Swarm-SLAM: Sparse Decentralized Collaborative Simultaneous Localization and Mapping Framework for Multi-Robot Systems <!--![Build Status](https://github.com/MISTLab/Swarm-SLAM/actions/workflows/main.yml/badge.svg)-->
+# Swarm-SLAM + AnyLoc: DINOv2-Based Visual Place Recognition for Multi-Robot C-SLAM
 
-![Swarm-SLAM Overview](media/system-overview.svg)
+This repository is a fork of [MISTLab/Swarm-SLAM](https://github.com/MISTLab/Swarm-SLAM), extended with [AnyLoc](https://anyloc.github.io/) (DINOv2 + VLAD) as a pluggable visual place recognition (VPR) backend. The work was conducted as a course project for CMU 16-833 (Robot Localization and Mapping).
 
-Look up our [Documentation](https://lajoiepy.github.io/cslam_documentation/html/index.html) and our [Start-up instructions](https://lajoiepy.github.io/cslam_documentation/html/md_startup-instructions.html)!
+## Overview
 
-<p align="center">
-  <img src="media/graco_pg.gif" alt="Swarm-SLAM on GRACO dataset" width="48%" />
-  <img src="media/graco_pc.gif" alt="Swarm-SLAM on GRACO dataset" width="48%" />
-</p>
+[Swarm-SLAM](https://ieeexplore.ieee.org/document/10321649) is a sparse, decentralized Collaborative SLAM (C-SLAM) framework for multi-robot systems. Robots share compact global descriptors to detect inter-robot loop closures and jointly optimize a shared pose graph via decentralized PGO (GTSAM). It supports lidar, stereo, and RGB-D sensing.
 
-[Swarm-SLAM](https://ieeexplore.ieee.org/document/10321649) is an open-source C-SLAM system designed to be scalable, flexible, decentralized, and sparse, which are all key properties in swarm robotics. Our system supports lidar, stereo, and RGB-D sensing, and it includes a novel inter-robot loop closure prioritization technique that reduces inter-robot communication and accelerates the convergence.
+This fork introduces AnyLoc's DINOv2 + VLAD descriptors as an alternative VPR backend alongside the default CosPlace (ResNet-18, 64-dim) baseline, and evaluates the accuracy–bandwidth trade-off across descriptor dimensionalities.
 
-To clone Swarm-SLAM:
+## What's New in This Fork
+
+- **AnyLoc/DINOv2 VPR backend** (`src/cslam/cslam/vpr/anyloc.py`) — DINOv2 features aggregated via VLAD with optional PCA compression, served over ZMQ from a standalone descriptor server (`experiments/dinov2_server.py`)
+- **EuRoC dataset support** — ASL-format player without rosbag conversion (`src/cslam_experiments/launch/sensors/euroc_asl_player.py`)
+- **Evaluation pipeline** — APE trajectory error, loop closure recall, and descriptor bandwidth analysis (`evaluate.py`, `experiments/analyze_lc.py`)
+- **Docker environment** — GPU-enabled container with all dependencies pinned for reproducibility
+
+## System Architecture
+
 ```
-sudo apt install python3-vcstool
-git clone https://github.com/MISTLab/Swarm-SLAM.git
-cd Swarm-SLAM
-mkdir src
-vcs import src < cslam.repos
+┌─────────────────────────────────────────────────────┐
+│  Each Robot                                         │
+│  ┌──────────┐   stereo   ┌──────────────────────┐  │
+│  │ RTAB-Map │ ─────────► │  VPR Backend         │  │
+│  │ Odometry │            │  CosPlace / AnyLoc   │  │
+│  └──────────┘            └──────────┬───────────┘  │
+│                                     │ descriptor    │
+│                          ┌──────────▼───────────┐  │
+│                          │  Loop Closure        │  │
+│                          │  Detection + MAC     │  │
+│                          └──────────┬───────────┘  │
+└─────────────────────────────────────┼───────────────┘
+                                      │ inter-robot LCs
+                          ┌───────────▼──────────┐
+                          │  Decentralized PGO   │
+                          │  (GTSAM)             │
+                          └──────────────────────┘
 ```
 
-Packages summary:
-- [cslam](https://github.com/lajoiepy/cslam): contains the Swarm-SLAM nodes;
-- [cslam_interfaces](https://github.com/lajoiepy/cslam_interfaces): contains the custom ROS 2 messages;
-- [cslam_experiments](https://github.com/lajoiepy/cslam_experiments): contains examples of launch files and configurations for different setups;
-- [cslam_visualization](https://github.com/lajoiepy/cslam_visualization): contains an online (optional) visualization tool to run on your base station to monitor the mapping progress.
+## VPR Backends
 
-Follow the [start-up instructions](https://lajoiepy.github.io/cslam_documentation/html/md_startup-instructions.html) to install, build and run Swarm-SLAM.
+| Backend | Descriptor Dim | Notes |
+|---------|---------------|-------|
+| CosPlace (baseline) | 64 | ResNet-18, default |
+| AnyLoc/DINOv2 | 64 / 128 / 256 / 512 | DINOv2 + VLAD + PCA, configurable |
 
-How to cite [our paper](https://ieeexplore.ieee.org/document/10321649):
+## Repository Structure
+
 ```
+Swarm-SLAM/
+├── src/
+│   ├── cslam/               # Core SLAM package (Python + C++)
+│   ├── cslam_interfaces/    # Custom ROS 2 message definitions
+│   ├── cslam_experiments/   # Launch files and configs
+│   └── cslam_visualization/ # Optional RViz2 visualization
+├── experiments/             # Standalone scripts (DINOv2 server, analysis)
+├── data/                    # Datasets (EuRoC, S3E)
+├── results/                 # Experiment outputs
+└── docker/                  # Dockerfile and docker-compose
+```
+
+## Quick Start
+
+All development and execution runs inside Docker.
+
+```bash
+# Build the image (one-time, ~10–15 min)
+cd docker && make build
+
+# Start the container
+make run
+
+# Inside the container — build the workspace
+cd /root/ws
+colcon build && source install/setup.bash
+
+# Run a 2-robot EuRoC experiment (CosPlace baseline)
+ros2 launch cslam_experiments euroc_stereo.launch.py \
+  dataset_path:=/root/datasets/EuRoC \
+  sequences:=MH_01_easy,MH_02_easy \
+  max_nb_robots:=2
+
+# Evaluate results
+python3 /root/ws/src/swarm_slam/evaluate.py
+```
+
+For the AnyLoc/DINOv2 backend, start the descriptor server in a separate terminal before launching:
+
+```bash
+python3 experiments/dinov2_server.py --port 5555 --device cuda --dim 128
+```
+
+Then launch with `config_file:=euroc_stereo_anyloc.yaml`.
+
+## Citation
+
+If you use this work, please cite the original Swarm-SLAM paper:
+
+```bibtex
 @ARTICLE{lajoieSwarmSLAM,
   author={Lajoie, Pierre-Yves and Beltrame, Giovanni},
-  journal={IEEE Robotics and Automation Letters}, 
-  title={Swarm-SLAM: Sparse Decentralized Collaborative Simultaneous Localization and Mapping Framework for Multi-Robot Systems}, 
+  journal={IEEE Robotics and Automation Letters},
+  title={Swarm-SLAM: Sparse Decentralized Collaborative Simultaneous Localization and Mapping Framework for Multi-Robot Systems},
   year={2024},
   volume={9},
   number={1},
   pages={475-482},
   doi={10.1109/LRA.2023.3333742}
 }
-
 ```
-
