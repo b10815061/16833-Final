@@ -1,0 +1,42 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+    image: swarm-slam-dev
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=0
+    volumes:
+      # Mount source code from host — edit on host, build in container
+      - ../src:/home/ros/ws/src/swarm_slam:rw
+      - ../FinalProject:/home/ros/ws/FinalProject
+      # Persist build artifacts across container restarts
+      - build:/home/ros/ws/build
+      - install:/home/ros/ws/install
+      - log:/home/ros/ws/log
+      # X11 forwarding for RViz
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # DINOv2 / torch model cache — avoid re-downloading
+      - torch_cache:/home/ros/.cache/torch
+      # Dataset mount
+      - ../data:/home/ros/datasets:ro
+      # Experiment results — persisted on host for evaluation
+      - ../results:/home/ros/ws/results:rw
+    network_mode: host
+    stdin_open: true
+    tty: true
+    command: bash
+
+volumes:
+  build:
+  install:
+  log:
+  torch_cache:

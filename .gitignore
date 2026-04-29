@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+install/
+log/
+
+# Datasets (too large for git)
+data/
+**/FinalProject/
+
+# Experiment results
+results/
+
+# Model weights
+src/cslam/models/*.pth
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# OS
+.DS_Store
+
+docker/
+**/docs
