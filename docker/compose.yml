@@ -1,0 +1,40 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+    image: swarm-slam-dev
+    devices:
+      - nvidia.com/gpu=all
+    security_opt:
+      - label=disable
+    environment:
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=0
+    volumes:
+      - ../src:/home/ros/ws/src/swarm_slam:rw
+      - ../FinalProject:/home/ros/ws/FinalProject
+      - build:/home/ros/ws/build
+      - install:/home/ros/ws/install
+      - log:/home/ros/ws/log
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - torch_cache:/home/ros/.cache/torch
+      - /home/datasets2/swarm-slam:/home/ros/datasets
+      - ../results:/home/ros/ws/results:rw
+    network_mode: host
+    # userns_mode: keep-id
+    
+    stdin_open: true
+    tty: true
+    command: bash
+
+volumes:
+  build:
+  install:
+  log:
+  torch_cache:

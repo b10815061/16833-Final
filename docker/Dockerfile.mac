@@ -1,0 +1,67 @@
+# Mac-compatible development container
+# Supports Apple Silicon (arm64) and Intel Mac (amd64) via multi-arch base image.
+# No CUDA — CPU-only PyTorch replaces the CUDA builds in the original Dockerfiles.
+FROM osrf/ros:humble-desktop
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ROS_DISTRO=humble
+
+# ── System dependencies ───────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip python3-vcstool python3-colcon-common-extensions \
+    ros-${ROS_DISTRO}-rtabmap ros-${ROS_DISTRO}-rtabmap-ros \
+    ros-${ROS_DISTRO}-pcl-ros ros-${ROS_DISTRO}-pcl-conversions \
+    ros-${ROS_DISTRO}-octomap ros-${ROS_DISTRO}-octomap-msgs \
+    ros-${ROS_DISTRO}-nav2-msgs ros-${ROS_DISTRO}-nav2-common \
+    ros-${ROS_DISTRO}-tf2-eigen ros-${ROS_DISTRO}-tf2-geometry-msgs \
+    ros-${ROS_DISTRO}-image-transport ros-${ROS_DISTRO}-image-transport-plugins \
+    ros-${ROS_DISTRO}-laser-geometry ros-${ROS_DISTRO}-perception-pcl \
+    ros-${ROS_DISTRO}-diagnostic-msgs ros-${ROS_DISTRO}-rviz2 \
+    ros-${ROS_DISTRO}-rosbag2-storage-mcap \
+    ros-${ROS_DISTRO}-foxglove-bridge \
+    git wget curl unzip cmake sudo \
+    libboost-all-dev libtbb-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── GTSAM 4.1.1 (built from source, same as original) ────────────────────────
+RUN git clone --depth 1 --branch 4.1.1 https://github.com/borglab/gtsam.git /tmp/gtsam \
+    && cd /tmp/gtsam && mkdir build && cd build \
+    && cmake .. \
+         -DCMAKE_BUILD_TYPE=Release \
+         -DGTSAM_BUILD_EXAMPLES_ALWAYS=OFF \
+         -DGTSAM_BUILD_TESTS=OFF \
+         -DGTSAM_BUILD_UNSTABLE=ON \
+         -DGTSAM_WITH_TBB=ON \
+    && make -j$(nproc) && make install && ldconfig \
+    && rm -rf /tmp/gtsam
+
+# ── Python: CPU-only PyTorch (no CUDA on Mac) ────────────────────────────────
+RUN pip3 install --no-cache-dir \
+    torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+RUN pip3 install --no-cache-dir \
+    "numpy<2" scipy scikit-learn \
+    networkx Pillow \
+    sortedcontainers distinctipy numpy-quaternion evo
+
+# numba and open3d are best-effort on ARM64 — failures won't break the image
+RUN pip3 install --no-cache-dir numba open3d || true
+
+# ── Non-root user 'dev' ───────────────────────────────────────────────────────
+# Password for both 'dev' (sudo) and 'root': swarm2024
+ARG DEV_PASSWORD=swarm2024
+RUN useradd -m -u 1000 -s /bin/bash dev \
+    && echo "dev:${DEV_PASSWORD}" | chpasswd \
+    && echo "root:${DEV_PASSWORD}" | chpasswd \
+    && usermod -aG sudo dev
+
+# Workspace owned by dev
+RUN mkdir -p /home/dev/ws && chown -R dev:dev /home/dev/ws
+
+# Auto-source ROS and workspace in dev's shell
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /home/dev/.bashrc \
+    && echo '[ -f /home/dev/ws/install/setup.bash ] && source /home/dev/ws/install/setup.bash' \
+       >> /home/dev/.bashrc
+
+USER dev
+WORKDIR /home/dev/ws
